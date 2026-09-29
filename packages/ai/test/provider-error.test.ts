@@ -366,6 +366,16 @@ describe("provider error rawBody classification", () => {
     expect(reason._tag === "InvalidRequest" ? reason.classification : reason._tag).toBe("context-overflow")
   })
 
+  test("classifies DeepInfra input length rejections as context overflow", () => {
+    const message = "Requested input length 600010 exceeds maximum input length 131071"
+    // DeepInfra sends this as an error event after HTTP 200.
+    const reason = classifyProviderFailure({
+      message,
+      rawBody: JSON.stringify({ error: { message, type: "invalid_request_error", param: null, code: 400 } }),
+    })
+    expect(reason._tag === "InvalidRequest" ? reason.classification : reason._tag).toBe("context-overflow")
+  })
+
   test("classifies Google invalid API keys as authentication failures", () => {
     const rawBody = JSON.stringify({
       error: {
