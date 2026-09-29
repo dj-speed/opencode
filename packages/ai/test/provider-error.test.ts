@@ -366,6 +366,28 @@ describe("provider error rawBody classification", () => {
     expect(reason._tag === "InvalidRequest" ? reason.classification : reason._tag).toBe("context-overflow")
   })
 
+  test("classifies Z.ai Responses stream rejections without retrying them", () => {
+    const failed = (code: string, message: string) =>
+      JSON.stringify({
+        response: { created_at: 0, error: { code, message }, id: "resp_1", model: "glm-4.6", status: "failed" },
+        sequence_number: 0,
+        type: "response.failed",
+      })
+    const cases = [
+      ["model_not_found", "Unknown Model, please check the model code.[20260930021741fdb0b57893db4642]"],
+      [
+        "permission_denied",
+        "Your GLM Coding Plan package has expired and is temporarily unavailable. You can resume using it after renewing the subscription on the official website. https://z.ai/subscribe。[20260930021742807eb8e2b21c4484]",
+      ],
+    ]
+    expect(
+      cases.map(
+        ([code, message]) =>
+          classifyProviderFailure({ message: `${code}: ${message}`, rawBody: failed(code, message) })._tag,
+      ),
+    ).toEqual(["InvalidRequest", "Authentication"])
+  })
+
   test("classifies Google invalid API keys as authentication failures", () => {
     const rawBody = JSON.stringify({
       error: {
