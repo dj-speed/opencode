@@ -113,6 +113,8 @@ const QUOTA_CODES = new Set([
 ])
 // Google reports an invalid API key as HTTP 400 INVALID_ARGUMENT with this `details[].reason`.
 const AUTH_CODES = new Set(["authentication_error", "permission_error", "api_key_invalid"])
+// xAI reports an invalid API key as HTTP 400 with the generic `invalid-argument` code.
+const AUTH_TEXT = /incorrect api key provided/i
 const SERVER_CODES = new Set([
   "api_error",
   "internal_error",
@@ -244,7 +246,12 @@ export function classifyProviderFailure(input: ProviderFailure): AIError["reason
     (input.status === 429 && QUOTA_TEXT.test(text))
   )
     return new QuotaExceededError(details)
-  if (input.status === 401 || input.status === 403 || codes.some((code) => AUTH_CODES.has(code)))
+  if (
+    input.status === 401 ||
+    input.status === 403 ||
+    codes.some((code) => AUTH_CODES.has(code)) ||
+    (input.status === 400 && AUTH_TEXT.test(text))
+  )
     return new AuthenticationError(details)
   if (
     input.status === 429 ||

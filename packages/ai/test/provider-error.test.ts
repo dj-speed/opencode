@@ -366,6 +366,28 @@ describe("provider error rawBody classification", () => {
     expect(reason._tag === "InvalidRequest" ? reason.classification : reason._tag).toBe("context-overflow")
   })
 
+  test("classifies xAI invalid API keys as authentication failures", () => {
+    const message = "Incorrect API key provided. You can obtain an API key from https://console.x.ai."
+    expect(
+      classifyProviderFailure({
+        message,
+        status: 400,
+        rawBody: JSON.stringify({ code: "invalid-argument", error: message }),
+      })._tag,
+    ).toBe("Authentication")
+  })
+
+  test("keeps other xAI invalid arguments as invalid requests", () => {
+    const message = "Temperature must be less than 2 but temperature = 99"
+    expect(
+      classifyProviderFailure({
+        message,
+        status: 400,
+        rawBody: JSON.stringify({ code: "invalid-argument", error: message }),
+      })._tag,
+    ).toBe("InvalidRequest")
+  })
+
   test("classifies Google invalid API keys as authentication failures", () => {
     const rawBody = JSON.stringify({
       error: {
