@@ -26,7 +26,8 @@ const patterns = [
   /reduce the length of the messages/i,
   /maximum context length is \d+ tokens/i,
   /exceeds (?:the )?maximum allowed input length of [\d,]+ tokens?/i,
-  /input \(\d+ tokens\) is longer than the model'?s context length \(\d+ tokens\)/i,
+  // Novita omits the token counts.
+  /input(?: \(\d+ tokens\))? is longer than the model'?s context length/i,
   /exceeds the limit of \d+/i,
   /exceeds the available context size/i,
   /greater than the context length/i,

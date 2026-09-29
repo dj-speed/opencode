@@ -366,6 +366,16 @@ describe("provider error rawBody classification", () => {
     expect(reason._tag === "InvalidRequest" ? reason.classification : reason._tag).toBe("context-overflow")
   })
 
+  test("classifies Novita context length rejections as context overflow", () => {
+    const message = "The input is longer than the model's context length trace_id: 39d8c3a5c6c91dbc8dd9055f0b37e084"
+    const reason = classifyProviderFailure({
+      message,
+      status: 400,
+      rawBody: JSON.stringify({ message, type: "invalid_request_error" }),
+    })
+    expect(reason._tag === "InvalidRequest" ? reason.classification : reason._tag).toBe("context-overflow")
+  })
+
   test("classifies Google invalid API keys as authentication failures", () => {
     const rawBody = JSON.stringify({
       error: {
