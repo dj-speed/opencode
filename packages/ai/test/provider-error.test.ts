@@ -366,6 +366,20 @@ describe("provider error rawBody classification", () => {
     expect(reason._tag === "InvalidRequest" ? reason.classification : reason._tag).toBe("context-overflow")
   })
 
+  test("classifies Together input token rejections as context overflow", () => {
+    const message =
+      "Input validation error: `inputs` tokens + `max_new_tokens` must be <= 131073. Given: 600035 `inputs` tokens and 16 `max_new_tokens`"
+    const reason = classifyProviderFailure({
+      message,
+      status: 400,
+      rawBody: JSON.stringify({
+        id: "p3FXA1h-fdNmn-a42cf5711f4c6902",
+        error: { message, type: "invalid_request_error", param: "max_tokens", code: null },
+      }),
+    })
+    expect(reason._tag === "InvalidRequest" ? reason.classification : reason._tag).toBe("context-overflow")
+  })
+
   test("classifies Google invalid API keys as authentication failures", () => {
     const rawBody = JSON.stringify({
       error: {
