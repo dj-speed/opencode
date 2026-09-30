@@ -69,8 +69,9 @@ export function Dialog(
 function init() {
   const [store, setStore] = createStore({
     stack: [] as {
-      element: JSX.Element
+      element: JSX.Element | (() => JSX.Element)
       onClose?: () => void
+      autoFocus: boolean
     }[],
     size: "medium" as "medium" | "large" | "xlarge",
   })
@@ -85,8 +86,12 @@ function init() {
   })
 
   let focus: Renderable | null
+  let version = 0
   function refocus() {
+    const pending = version
     setTimeout(() => {
+      if (pending !== version) return
+      if (store.stack.at(-1)?.autoFocus) return
       if (!focus) return
       if (focus.isDestroyed) return
       function find(item: Renderable) {
@@ -102,6 +107,17 @@ function init() {
     }, 1)
   }
 
+  function close() {
+    if (renderer.getSelection()) renderer.clearSelection()
+    const current = store.stack.at(-1)
+    const pending = version
+    current?.onClose?.()
+    if (pending !== version || store.stack.at(-1) !== current) return
+    version++
+    setStore("stack", store.stack.slice(0, -1))
+    refocus()
+  }
+
   useBindings(() => ({
     enabled: store.stack.length > 0 && !renderer.getSelection()?.getSelectedText(),
     bindings: [
@@ -109,57 +125,50 @@ function init() {
         key: "escape",
         desc: "Close dialog",
         group: "Dialog",
-        cmd: () => {
-          if (renderer.getSelection()) {
-            renderer.clearSelection()
-          }
-          const current = store.stack.at(-1)
-          current?.onClose?.()
-          setStore("stack", store.stack.slice(0, -1))
-          refocus()
-        },
+        cmd: close,
       },
       {
         key: "ctrl+c",
         desc: "Close dialog",
         group: "Dialog",
-        cmd: () => {
-          if (renderer.getSelection()) {
-            renderer.clearSelection()
-          }
-          const current = store.stack.at(-1)
-          current?.onClose?.()
-          setStore("stack", store.stack.slice(0, -1))
-          refocus()
-        },
+        cmd: close,
       },
     ],
   }))
 
   return {
     clear() {
-      for (const item of store.stack) {
+      const stack = store.stack
+      const pending = version
+      for (const item of stack) {
         if (item.onClose) item.onClose()
       }
+      if (pending !== version) return
+      version++
       batch(() => {
         setStore("size", "medium")
         setStore("stack", [])
       })
       refocus()
     },
-    replace(input: any, onClose?: () => void) {
-      if (store.stack.length === 0) {
+    replace(input: () => JSX.Element, onClose?: () => void, options?: { autoFocus?: boolean }) {
+      const stack = store.stack
+      const pending = version
+      if (stack.length === 0) {
         focus = renderer.currentFocusedRenderable
-        focus?.blur()
       }
-      for (const item of store.stack) {
+      for (const item of stack) {
         if (item.onClose) item.onClose()
       }
+      if (pending !== version) return
+      version++
+      if (options?.autoFocus !== false) renderer.currentFocusedRenderable?.blur()
       setStore("size", "medium")
       setStore("stack", [
         {
           element: input,
           onClose,
+          autoFocus: options?.autoFocus !== false,
         },
       ])
     },
@@ -214,7 +223,10 @@ export function DialogProvider(props: ParentProps) {
       >
         <Show when={value.stack.length}>
           <Dialog onClose={() => value.clear()} size={value.size}>
-            {value.stack.at(-1)!.element}
+            {(() => {
+              const element = value.stack.at(-1)!.element
+              return typeof element === "function" ? element() : element
+            })()}
           </Dialog>
         </Show>
       </box>

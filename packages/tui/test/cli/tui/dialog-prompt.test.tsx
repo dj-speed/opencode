@@ -10,6 +10,7 @@ import { tmpdir } from "../../fixture/fixture"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
 import type { TuiKeybind } from "../../../src/config/keybind"
 import { TestTuiContexts } from "../../fixture/tui-environment"
+import type { DialogContext } from "../../../src/ui/dialog"
 
 async function wait(fn: () => boolean, timeout = 2000) {
   const start = Date.now()
@@ -143,5 +144,100 @@ test("dialog prompt submit can be rebound separately from input submit", async (
     expect(confirmed).toEqual(["draft"])
   } finally {
     await prompt.cleanup()
+  }
+})
+
+test("non-autofocus dialog keeps prompt editor focused through replacement and dismissal", async () => {
+  await using tmp = await tmpdir()
+  const state = path.join(tmp.path, "state")
+  await mkdir(state, { recursive: true })
+  await Bun.write(path.join(state, "kv.json"), "{}")
+
+  const [
+    { DialogProvider, useDialog },
+    { KVProvider },
+    { ThemeProvider },
+    { TuiConfigProvider },
+    { ToastProvider },
+    { OpencodeKeymapProvider, registerOpencodeKeymap },
+  ] = await Promise.all([
+    import("../../../src/ui/dialog"),
+    import("../../../src/context/kv"),
+    import("../../../src/context/theme"),
+    import("../../../src/config"),
+    import("../../../src/ui/toast"),
+    import("../../../src/keymap"),
+  ])
+
+  let dialog: DialogContext | undefined
+  let editor: TextareaRenderable | undefined
+  function Controls() {
+    dialog = useDialog()
+    return (
+      <textarea
+        ref={(value: TextareaRenderable) => {
+          editor = value
+        }}
+        initialValue="draft"
+      />
+    )
+  }
+
+  function Harness() {
+    const renderer = useRenderer()
+    const keymap = createDefaultOpenTuiKeymap(renderer)
+    const config = createTuiResolvedConfig({ keybinds: {}, leader_timeout: 1000 })
+    onCleanup(registerOpencodeKeymap(keymap, renderer, config))
+    return (
+      <TestTuiContexts directory={tmp.path} paths={{ home: tmp.path, state, worktree: tmp.path }}>
+        <OpencodeKeymapProvider keymap={keymap}>
+          <TuiConfigProvider config={config}>
+            <KVProvider>
+              <ThemeProvider mode="dark">
+                <ToastProvider>
+                  <DialogProvider>
+                    <Controls />
+                  </DialogProvider>
+                </ToastProvider>
+              </ThemeProvider>
+            </KVProvider>
+          </TuiConfigProvider>
+        </OpencodeKeymapProvider>
+      </TestTuiContexts>
+    )
+  }
+
+  const app = await testRender(() => <Harness />, { kittyKeyboard: true })
+  try {
+    await wait(() => !!editor && !!dialog)
+    if (!editor || !dialog) throw new Error("expected mounted dialog and editor")
+    const prompt = editor
+    const stack = dialog
+    const renderer = app.renderer
+    prompt.focus()
+    const render = () => (
+      <box>
+        <text>Dialog</text>
+      </box>
+    )
+
+    stack.replace(render, undefined, { autoFocus: false })
+    expect(stack.stack.at(-1)?.autoFocus).toBe(false)
+    expect(renderer.currentFocusedEditor).toBe(prompt)
+    expect(prompt.plainText).toBe("draft")
+
+    stack.replace(render, undefined, { autoFocus: false })
+    expect(renderer.currentFocusedEditor).toBe(prompt)
+
+    stack.replace(render)
+    expect(prompt.focused).toBe(false)
+    stack.replace(render, undefined, { autoFocus: false })
+    expect(prompt.focused).toBe(false)
+
+    stack.clear()
+    await wait(() => renderer.currentFocusedEditor === prompt)
+    expect(stack.stack).toHaveLength(0)
+  } finally {
+    app.renderer.destroy()
   }
 })

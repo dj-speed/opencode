@@ -126,7 +126,7 @@ export type TuiDialogProps = {
 }
 
 export type TuiDialogStack = {
-  replace: (render: () => JSX.Element, onClose?: () => void) => void
+  replace: (render: () => JSX.Element, onClose?: () => void, options?: { autoFocus?: boolean }) => void
   clear: () => void
   setSize: (size: "medium" | "large" | "xlarge") => void
   readonly size: "medium" | "large" | "xlarge"
