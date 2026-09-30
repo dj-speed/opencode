@@ -219,6 +219,7 @@ export const Definitions = {
   "permission.prompt.fullscreen": keybind("ctrl+f", "Toggle permission prompt fullscreen"),
   "permission.prompt.focus": keybind("ctrl+shift+p", "Focus or unfocus the pending permission prompt"),
   "question.prompt.focus": keybind("ctrl+shift+p", "Focus or unfocus the pending question prompt"),
+  "dialog.focus": keybind("ctrl+shift+p", "Focus or unfocus a non-focusing dialog"),
   "plugins.toggle": keybind("space", "Toggle plugin"),
   "dialog.plugins.install": keybind("shift+i", "Install plugin from plugin dialog"),
 

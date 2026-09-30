@@ -32,7 +32,7 @@ export function DialogPrompt(props: DialogPromptProps) {
 
   useBindings(() => ({
     target: textareaTarget,
-    enabled: textareaTarget() !== undefined && !props.busy,
+    enabled: textareaTarget() !== undefined && !props.busy && dialog.focused,
     // Dialog form semantics must win over the global managed textarea input layer.
     priority: 1,
     commands: [
@@ -48,12 +48,7 @@ export function DialogPrompt(props: DialogPromptProps) {
 
   onMount(() => {
     dialog.setSize("medium")
-    setTimeout(() => {
-      if (!textarea || textarea.isDestroyed) return
-      if (props.busy) return
-      textarea.focus()
-    }, 1)
-    textarea.gotoLineEnd()
+    if (textarea && !textarea.isDestroyed) textarea.gotoLineEnd()
   })
 
   createEffect(() => {
@@ -65,7 +60,7 @@ export function DialogPrompt(props: DialogPromptProps) {
         }
       : {}
     textarea.traits = traits
-    if (props.busy) {
+    if (props.busy || !dialog.focused) {
       textarea.blur()
       return
     }

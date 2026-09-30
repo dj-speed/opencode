@@ -115,6 +115,22 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
 
   let input: InputRenderable
 
+  // The filter input only takes focus when the dialog owns the keyboard. A
+  // non-autofocus dialog leaves the background input focused until the user
+  // presses the focus key (dialog.focus); this effect then moves focus in.
+  createEffect(() => {
+    if (!input || input.isDestroyed) return
+    if (!dialog.focused) {
+      if (input.focused) input.blur()
+      return
+    }
+    setTimeout(() => {
+      if (!input || input.isDestroyed) return
+      if (!dialog.focused) return
+      input.focus()
+    }, 1)
+  })
+
   const actions = createMemo(() => props.actions ?? [])
   const shownActions = createMemo(() => actions().filter((item) => !item.hidden))
   const actionBindings = useKeymapSelector((keymap) =>
@@ -370,6 +386,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     const visible = shownActions()
 
     return {
+      enabled: dialog.focused,
       commands: [
         {
           name: "dialog.select.prev",
@@ -584,11 +601,6 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
               ref={(r) => {
                 input = r
                 input.traits = { status: "FILTER" }
-                setTimeout(() => {
-                  if (!input) return
-                  if (input.isDestroyed) return
-                  input.focus()
-                }, 1)
               }}
               placeholder={props.placeholder ?? "Search"}
               placeholderColor={theme.textMuted}

@@ -7,6 +7,7 @@ import { useToast } from "./toast"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { useBindings, useOpencodeModeStack } from "../keymap"
 import { useClipboard } from "../context/clipboard"
+import { useTuiConfig } from "../config"
 
 export function Dialog(
   props: ParentProps<{
@@ -73,11 +74,16 @@ function init() {
       onClose?: () => void
       autoFocus: boolean
     }[],
+    // Whether the top dialog owns the keyboard. Autofocus dialogs start focused;
+    // non-autofocus dialogs start unfocused so the background input keeps focus
+    // and stays typable until the user presses the focus key.
+    focused: true,
     size: "medium" as "medium" | "large" | "xlarge",
   })
 
   const renderer = useRenderer()
   const modeStack = useOpencodeModeStack()
+  const tuiConfig = useTuiConfig()
 
   createEffect(() => {
     if (store.stack.length === 0) return
@@ -87,24 +93,42 @@ function init() {
 
   let focus: Renderable | null
   let version = 0
+  function restoreFocus() {
+    if (!focus) return
+    if (focus.isDestroyed) return
+    function find(item: Renderable) {
+      for (const child of item.getChildren()) {
+        if (child === focus) return true
+        if (find(child)) return true
+      }
+      return false
+    }
+    const found = find(renderer.root)
+    if (!found) return
+    focus.focus()
+  }
   function refocus() {
     const pending = version
     setTimeout(() => {
       if (pending !== version) return
-      if (store.stack.at(-1)?.autoFocus) return
-      if (!focus) return
-      if (focus.isDestroyed) return
-      function find(item: Renderable) {
-        for (const child of item.getChildren()) {
-          if (child === focus) return true
-          if (find(child)) return true
-        }
-        return false
-      }
-      const found = find(renderer.root)
-      if (!found) return
-      focus.focus()
+      if (store.stack.length > 0) return
+      restoreFocus()
     }, 1)
+  }
+
+  // Toggle keyboard ownership for a non-autofocus dialog. Focusing blurs the
+  // background renderable so the dialog's own inputs can take focus; unfocusing
+  // hands focus back to whatever was focused before the dialog opened.
+  function toggleFocus() {
+    const top = store.stack.at(-1)
+    if (!top || top.autoFocus) return
+    if (store.focused) {
+      setStore("focused", false)
+      setTimeout(restoreFocus, 1)
+      return
+    }
+    renderer.currentFocusedRenderable?.blur()
+    setStore("focused", true)
   }
 
   function close() {
@@ -114,12 +138,15 @@ function init() {
     current?.onClose?.()
     if (pending !== version || store.stack.at(-1) !== current) return
     version++
-    setStore("stack", store.stack.slice(0, -1))
+    batch(() => {
+      setStore("focused", false)
+      setStore("stack", store.stack.slice(0, -1))
+    })
     refocus()
   }
 
   useBindings(() => ({
-    enabled: store.stack.length > 0 && !renderer.getSelection()?.getSelectedText(),
+    enabled: store.stack.length > 0 && store.focused && !renderer.getSelection()?.getSelectedText(),
     bindings: [
       {
         key: "escape",
@@ -136,6 +163,22 @@ function init() {
     ],
   }))
 
+  useBindings(() => {
+    const top = store.stack.at(-1)
+    if (!top || top.autoFocus) return { commands: [], bindings: [] }
+    return {
+      commands: [
+        {
+          name: "dialog.focus",
+          title: "Focus or unfocus dialog",
+          category: "Dialog",
+          run: toggleFocus,
+        },
+      ],
+      bindings: tuiConfig.keybinds.get("dialog.focus"),
+    }
+  })
+
   return {
     clear() {
       const stack = store.stack
@@ -147,6 +190,7 @@ function init() {
       version++
       batch(() => {
         setStore("size", "medium")
+        setStore("focused", false)
         setStore("stack", [])
       })
       refocus()
@@ -162,18 +206,23 @@ function init() {
       }
       if (pending !== version) return
       version++
-      if (options?.autoFocus !== false) renderer.currentFocusedRenderable?.blur()
+      const autoFocus = options?.autoFocus !== false
+      if (autoFocus) renderer.currentFocusedRenderable?.blur()
       setStore("size", "medium")
+      setStore("focused", autoFocus)
       setStore("stack", [
         {
           element: input,
           onClose,
-          autoFocus: options?.autoFocus !== false,
+          autoFocus,
         },
       ])
     },
     get stack() {
       return store.stack
+    },
+    get focused() {
+      return store.focused
     },
     get size() {
       return store.size
