@@ -1,5 +1,5 @@
 import { createStore } from "solid-js/store"
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { useRenderer } from "@opentui/solid"
 import type { TextareaRenderable } from "@opentui/core"
 import { selectedForeground, tint, useTheme } from "../../context/theme"
@@ -7,16 +7,22 @@ import type { QuestionAnswer, QuestionRequest } from "@opencode-ai/sdk/v2"
 import { useSDK } from "../../context/sdk"
 import { SplitBorder } from "../../ui/border"
 import { useTuiConfig } from "../../config"
-import { useBindings, useOpencodeModeStack } from "../../keymap"
+import { useBindings, useCommandShortcut, useOpencodeModeStack } from "../../keymap"
 
 const QUESTION_MODE = "question"
 
-export function QuestionPrompt(props: { request: QuestionRequest; directory?: string }) {
+export function QuestionPrompt(props: {
+  request: QuestionRequest
+  directory?: string
+  focused: boolean
+  onFocus: () => void
+}) {
   const sdk = useSDK()
   const { theme } = useTheme()
   const renderer = useRenderer()
   const tuiConfig = useTuiConfig()
   const modeStack = useOpencodeModeStack()
+  const focusHint = useCommandShortcut("question.prompt.focus")
 
   const questions = createMemo(() => props.request.questions)
   const single = createMemo(() => questions().length === 1 && questions()[0]?.multiple !== true)
@@ -125,14 +131,28 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
     pick(opt.label)
   }
 
-  onMount(() => {
+  // Question-specific keys only own the keyboard while the popup is focused;
+  // otherwise the regular session input keeps focus and stays typable.
+  createEffect(() => {
+    if (!props.focused) return
     const popMode = modeStack.push(QUESTION_MODE)
     onCleanup(popMode)
   })
 
+  // Keep the custom-answer textarea in sync with the popup focus.
+  createEffect(() => {
+    if (!textarea || textarea.isDestroyed) return
+    if (props.focused && store.editing) {
+      textarea.focus()
+      textarea.gotoLineEnd()
+      return
+    }
+    if (textarea.focused) textarea.blur()
+  })
+
   useBindings(() => ({
     mode: QUESTION_MODE,
-    enabled: store.editing && !confirm(),
+    enabled: props.focused && store.editing && !confirm(),
     commands: [
       {
         name: "prompt.clear",
@@ -213,7 +233,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
 
     return {
       mode: QUESTION_MODE,
-      enabled: !store.editing,
+      enabled: props.focused && !store.editing,
       commands: [
         {
           name: "app.exit",
@@ -287,6 +307,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
 
   return (
     <box
+      flexShrink={0}
       backgroundColor={theme.backgroundPanel}
       border={["left"]}
       borderColor={theme.accent}
@@ -316,6 +337,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
                     onMouseOut={() => setTabHover(null)}
                     onMouseUp={() => {
                       if (renderer.getSelection()?.getSelectedText()) return
+                      props.onFocus()
                       selectTab(index())
                     }}
                   >
@@ -344,6 +366,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
               onMouseOut={() => setTabHover(null)}
               onMouseUp={() => {
                 if (renderer.getSelection()?.getSelectedText()) return
+                props.onFocus()
                 selectTab(questions().length)
               }}
             >
@@ -371,6 +394,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
                       onMouseDown={() => moveTo(i())}
                       onMouseUp={() => {
                         if (renderer.getSelection()?.getSelectedText()) return
+                        props.onFocus()
                         selectOption()
                       }}
                     >
@@ -403,6 +427,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
                   onMouseDown={() => moveTo(options().length)}
                   onMouseUp={() => {
                     if (renderer.getSelection()?.getSelectedText()) return
+                    props.onFocus()
                     selectOption()
                   }}
                 >
@@ -428,10 +453,12 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
                         ref={(val: TextareaRenderable) => {
                           textarea = val
                           val.traits = { status: "ANSWER" }
-                          queueMicrotask(() => {
-                            val.focus()
-                            val.gotoLineEnd()
-                          })
+                          if (props.focused) {
+                            queueMicrotask(() => {
+                              val.focus()
+                              val.gotoLineEnd()
+                            })
+                          }
                         }}
                         initialValue={input()}
                         placeholder="Type your own answer"
@@ -487,28 +514,37 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
         paddingBottom={1}
         justifyContent="space-between"
       >
-        <box flexDirection="row" gap={2}>
-          <Show when={!single()}>
+        <Show
+          when={props.focused}
+          fallback={
             <text fg={theme.text}>
-              {"⇆"} <span style={{ fg: theme.textMuted }}>tab</span>
+              {focusHint()} <span style={{ fg: theme.textMuted }}>answer</span>
             </text>
-          </Show>
-          <Show when={!confirm()}>
+          }
+        >
+          <box flexDirection="row" gap={2}>
+            <Show when={!single()}>
+              <text fg={theme.text}>
+                {"⇆"} <span style={{ fg: theme.textMuted }}>tab</span>
+              </text>
+            </Show>
+            <Show when={!confirm()}>
+              <text fg={theme.text}>
+                {"↑↓"} <span style={{ fg: theme.textMuted }}>select</span>
+              </text>
+            </Show>
             <text fg={theme.text}>
-              {"↑↓"} <span style={{ fg: theme.textMuted }}>select</span>
+              enter{" "}
+              <span style={{ fg: theme.textMuted }}>
+                {confirm() ? "submit" : multi() ? "toggle" : single() ? "submit" : "confirm"}
+              </span>
             </text>
-          </Show>
-          <text fg={theme.text}>
-            enter{" "}
-            <span style={{ fg: theme.textMuted }}>
-              {confirm() ? "submit" : multi() ? "toggle" : single() ? "submit" : "confirm"}
-            </span>
-          </text>
 
-          <text fg={theme.text}>
-            esc <span style={{ fg: theme.textMuted }}>dismiss</span>
-          </text>
-        </box>
+            <text fg={theme.text}>
+              esc <span style={{ fg: theme.textMuted }}>dismiss</span>
+            </text>
+          </box>
+        </Show>
       </box>
     </box>
   )

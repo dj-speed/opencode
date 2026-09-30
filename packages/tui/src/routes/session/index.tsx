@@ -237,8 +237,18 @@ export function Session() {
     if (session()?.parentID) return []
     return children().flatMap((x) => sync.data.question[x.id] ?? [])
   })
-  const visible = createMemo(() => !session()?.parentID && permissions().length === 0 && questions().length === 0)
-  const disabled = createMemo(() => permissions().length > 0 || questions().length > 0)
+  const visible = createMemo(() => !session()?.parentID)
+
+  // Permission/question prompts render top-anchored and unfocused by default so
+  // the regular input keeps focus and stays typable. The focus key
+  // (permission.prompt.focus / question.prompt.focus) toggles keyboard
+  // ownership between the popup and the regular input.
+  const [focusedPrompt, setFocusedPrompt] = createSignal<"permission" | "question" | undefined>()
+  const activePrompt = createMemo<"permission" | "question" | undefined>(() => {
+    if (permissions().length > 0) return "permission"
+    if (questions().length > 0) return "question"
+    return undefined
+  })
 
   const pending = createMemo(() => {
     const completed = messages().findLastIndex((message) => message.role === "assistant" && message.time.completed)
@@ -353,6 +363,31 @@ export function Session() {
   const keymap = useOpencodeKeymap()
   const dialog = useDialog()
   const renderer = useRenderer()
+
+  const focusPrompt = () => {
+    const active = activePrompt()
+    if (!active) return
+    setFocusedPrompt(active)
+    prompt?.blur()
+  }
+  const togglePromptFocus = () => {
+    const active = activePrompt()
+    if (!active) return
+    if (focusedPrompt() === active) {
+      setFocusedPrompt(undefined)
+      prompt?.focus()
+      return
+    }
+    focusPrompt()
+  }
+  // When the pending prompt resolves (or a different kind replaces it), drop
+  // keyboard ownership and hand focus back to the session input.
+  createEffect(
+    on(activePrompt, () => {
+      setFocusedPrompt(undefined)
+      prompt?.focus()
+    }),
+  )
 
   event.on("session.status", (evt) => {
     if (evt.properties.sessionID !== route.sessionID) return
@@ -1119,6 +1154,27 @@ export function Session() {
     bindings: tuiConfig.keybinds.get("session.background"),
   }))
 
+  // Focus toggle for the top-anchored permission/question prompts. It is
+  // registered without a mode so the same key works whether the popup owns the
+  // keyboard (question mode) or not (base mode).
+  useBindings(() => {
+    const active = activePrompt()
+    if (!active) return { commands: [], bindings: [] }
+    const name = active === "permission" ? "permission.prompt.focus" : "question.prompt.focus"
+    return {
+      enabled: () => dialog.stack.length === 0,
+      commands: [
+        {
+          name,
+          title: active === "permission" ? "Focus permission prompt" : "Focus question prompt",
+          category: "Prompt",
+          run: togglePromptFocus,
+        },
+      ],
+      bindings: tuiConfig.keybinds.get(name),
+    }
+  })
+
   const revertInfo = createMemo(() => session()?.revert)
   const revertMessageID = createMemo(() => revertInfo()?.messageID)
   const revertMessageIndex = createMemo(() => {
@@ -1177,6 +1233,22 @@ export function Session() {
         <box flexDirection="row" flexGrow={1} minHeight={0}>
           <box flexGrow={1} minHeight={0} paddingBottom={1} paddingLeft={2} paddingRight={2} gap={1}>
             <Show when={session()}>
+              <Show when={permissions().length > 0}>
+                <PermissionPrompt
+                  request={permissions()[0]}
+                  directory={sync.session.get(permissions()[0].sessionID)?.directory}
+                  focused={focusedPrompt() === "permission"}
+                  onFocus={focusPrompt}
+                />
+              </Show>
+              <Show when={permissions().length === 0 && questions().length > 0}>
+                <QuestionPrompt
+                  request={questions()[0]}
+                  directory={sync.session.get(questions()[0].sessionID)?.directory}
+                  focused={focusedPrompt() === "question"}
+                  onFocus={focusPrompt}
+                />
+              </Show>
               <scrollbox
                 ref={(r) => (scroll = r)}
                 viewportOptions={{
@@ -1294,18 +1366,6 @@ export function Session() {
                 </For>
               </scrollbox>
               <box flexShrink={0}>
-                <Show when={permissions().length > 0}>
-                  <PermissionPrompt
-                    request={permissions()[0]}
-                    directory={sync.session.get(permissions()[0].sessionID)?.directory}
-                  />
-                </Show>
-                <Show when={permissions().length === 0 && questions().length > 0}>
-                  <QuestionPrompt
-                    request={questions()[0]}
-                    directory={sync.session.get(questions()[0].sessionID)?.directory}
-                  />
-                </Show>
                 <Show when={session()?.parentID}>
                   <SubagentFooter />
                 </Show>
@@ -1315,14 +1375,14 @@ export function Session() {
                     mode="replace"
                     session_id={route.sessionID}
                     visible={visible()}
-                    disabled={disabled()}
+                    disabled={false}
                     on_submit={toBottom}
                     ref={bind}
                   >
                     <Prompt
                       visible={visible()}
                       ref={bind}
-                      disabled={disabled()}
+                      disabled={false}
                       onSubmit={() => {
                         toBottom()
                       }}

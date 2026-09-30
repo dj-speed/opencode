@@ -108,7 +108,12 @@ function TextBody(props: { title: string; description?: string; icon?: string })
   )
 }
 
-export function PermissionPrompt(props: { request: PermissionRequest; directory?: string }) {
+export function PermissionPrompt(props: {
+  request: PermissionRequest
+  directory?: string
+  focused: boolean
+  onFocus: () => void
+}) {
   const sdk = useSDK()
   const project = useProject()
   const sync = useSync()
@@ -162,6 +167,8 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
           }
           options={{ confirm: "Confirm", cancel: "Cancel" }}
           escapeKey="cancel"
+          focused={props.focused}
+          onFocus={props.onFocus}
           onSelect={(option) => {
             setStore("stage", "permission")
             if (option === "cancel") return
@@ -176,6 +183,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
       </Match>
       <Match when={store.stage === "reject"}>
         <RejectPrompt
+          focused={props.focused}
           onConfirm={(message) => {
             void sdk.client.permission.reply({
               reply: "reject",
@@ -405,6 +413,8 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
               options={{ once: "Allow once", always: "Allow always", reject: "Reject" }}
               escapeKey="reject"
               fullscreen
+              focused={props.focused}
+              onFocus={props.onFocus}
               onSelect={(option) => {
                 if (option === "always") {
                   setStore("stage", "always")
@@ -440,7 +450,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
   )
 }
 
-function RejectPrompt(props: { onConfirm: (message: string) => void; onCancel: () => void }) {
+function RejectPrompt(props: { focused: boolean; onConfirm: (message: string) => void; onCancel: () => void }) {
   let input: TextareaRenderable
   const { theme } = useTheme()
   const tuiConfig = useTuiConfig()
@@ -448,6 +458,7 @@ function RejectPrompt(props: { onConfirm: (message: string) => void; onCancel: (
   const narrow = createMemo(() => dimensions().width < 80)
   useBindings(() => ({
     mode: OPENCODE_BASE_MODE,
+    enabled: props.focused,
     commands: [
       {
         name: "app.exit",
@@ -472,6 +483,7 @@ function RejectPrompt(props: { onConfirm: (message: string) => void; onCancel: (
 
   return (
     <box
+      flexShrink={0}
       backgroundColor={theme.backgroundPanel}
       border={["left"]}
       borderColor={theme.error}
@@ -503,7 +515,7 @@ function RejectPrompt(props: { onConfirm: (message: string) => void; onCancel: (
             input = val
             val.traits = { status: "REJECT" }
           }}
-          focused
+          focused={props.focused}
           textColor={theme.text}
           focusedTextColor={theme.text}
           cursorColor={theme.primary}
@@ -529,6 +541,8 @@ function Prompt<const T extends Record<string, string>>(props: {
   options: T
   escapeKey?: keyof T
   fullscreen?: boolean
+  focused: boolean
+  onFocus: () => void
   onSelect: (option: keyof T) => void
 }) {
   const { theme } = useTheme()
@@ -541,9 +555,11 @@ function Prompt<const T extends Record<string, string>>(props: {
   })
   const narrow = createMemo(() => dimensions().width < 80)
   const fullscreenHint = useCommandShortcut("permission.prompt.fullscreen")
+  const focusHint = useCommandShortcut("permission.prompt.focus")
 
   useBindings(() => ({
     mode: OPENCODE_BASE_MODE,
+    enabled: props.focused,
     commands: [
       {
         name: "app.exit",
@@ -631,6 +647,7 @@ function Prompt<const T extends Record<string, string>>(props: {
 
   const content = () => (
     <box
+      flexShrink={0}
       backgroundColor={theme.backgroundPanel}
       border={["left"]}
       borderColor={theme.warning}
@@ -683,6 +700,7 @@ function Prompt<const T extends Record<string, string>>(props: {
                 backgroundColor={option === store.selected ? theme.warning : theme.backgroundMenu}
                 onMouseOver={() => setStore("selected", option)}
                 onMouseUp={() => {
+                  props.onFocus()
                   setStore("selected", option)
                   props.onSelect(option)
                 }}
@@ -695,17 +713,26 @@ function Prompt<const T extends Record<string, string>>(props: {
           </For>
         </box>
         <box flexDirection="row" gap={2} flexShrink={0}>
-          <Show when={props.fullscreen}>
+          <Show
+            when={props.focused}
+            fallback={
+              <text fg={theme.text}>
+                {focusHint()} <span style={{ fg: theme.textMuted }}>answer</span>
+              </text>
+            }
+          >
+            <Show when={props.fullscreen}>
+              <text fg={theme.text}>
+                {fullscreenHint()} <span style={{ fg: theme.textMuted }}>{hint()}</span>
+              </text>
+            </Show>
             <text fg={theme.text}>
-              {fullscreenHint()} <span style={{ fg: theme.textMuted }}>{hint()}</span>
+              {"⇆"} <span style={{ fg: theme.textMuted }}>select</span>
+            </text>
+            <text fg={theme.text}>
+              enter <span style={{ fg: theme.textMuted }}>confirm</span>
             </text>
           </Show>
-          <text fg={theme.text}>
-            {"⇆"} <span style={{ fg: theme.textMuted }}>select</span>
-          </text>
-          <text fg={theme.text}>
-            enter <span style={{ fg: theme.textMuted }}>confirm</span>
-          </text>
         </box>
       </box>
     </box>

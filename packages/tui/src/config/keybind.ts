@@ -217,6 +217,8 @@ export const Definitions = {
   "prompt.autocomplete.select": keybind("return", "Select autocomplete item"),
   "prompt.autocomplete.complete": keybind("tab", "Complete autocomplete item"),
   "permission.prompt.fullscreen": keybind("ctrl+f", "Toggle permission prompt fullscreen"),
+  "permission.prompt.focus": keybind("ctrl+shift+p", "Focus or unfocus the pending permission prompt"),
+  "question.prompt.focus": keybind("ctrl+shift+p", "Focus or unfocus the pending question prompt"),
   "plugins.toggle": keybind("space", "Toggle plugin"),
   "dialog.plugins.install": keybind("shift+i", "Install plugin from plugin dialog"),
 
