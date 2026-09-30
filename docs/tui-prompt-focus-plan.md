@@ -22,9 +22,15 @@
    (`dialog.replace(render, onClose, { autoFocus: false })`) and use it for the
    event-driven dialogs of the LLM permission parser (bash/webfetch/task/
    external_directory) so those do not steal focus either.
+   The option alone is NOT enough: `DialogSelect`/`DialogPrompt` self-focus
+   their filter/textarea and register un-gated keys, so the host now also skips
+   that self-focus and gates their keybindings behind the dialog focus state,
+   with a new `dialog.focus` keybind (default `ctrl+shift+p`) to enter/leave a
+   non-autofocus dialog. The prompt blur effect keys off `dialog.focused`.
    NOTE: the parser plugin lives in `opencode-config` (separate branch); its
-   side of the opt-in is a one-line change + local type cast against the pinned
-   `@opencode-ai/plugin`. Coordinate at ship; do not edit that repo from here.
+   side is still just `api.ui.dialog.replace(render, onClose, { autoFocus: false })`
+   (+ local type cast against the pinned `@opencode-ai/plugin`). Coordinate at
+   ship; do not edit that repo from here.
 
 ## Code map (packages/tui/src)
 - `routes/session/index.tsx` — move the permission/question <Show> blocks above
@@ -37,8 +43,10 @@
   (currently pushed onMount); same hint/gating.
 - `config/keybind.ts` — add the two definitions (default `ctrl+shift+p`).
 - `ui/dialog.tsx` (+ `plugin/adapters.tsx`, `packages/plugin/src/tui.ts`) —
-  non-autofocus dialogs; `component/prompt/index.tsx` blur effect must key off
-  dialog focus (line ~636-645), not `dialog.stack.length > 0` alone.
+  non-autofocus dialogs + a `focused` state and `dialog.focus` toggle;
+  `ui/dialog-select.tsx` / `ui/dialog-prompt.tsx` skip self-focus and gate keys
+  on that state; `component/prompt/index.tsx` blur effect keys off dialog focus
+  (line ~636-645), not `dialog.stack.length > 0` alone.
 
 ## Verify
 - `bun test` (packages/tui) + `tsgo --noEmit`; add regression tests
