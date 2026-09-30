@@ -9,27 +9,29 @@ import { fixedResponse } from "../lib/http.js"
 import { sseEvents } from "../lib/sse.js"
 
 describe("OpenRouter", () => {
-  it.effect("prepares OpenRouter models through the OpenAI-compatible Chat route", () =>
-    Effect.gen(function* () {
-      const model = OpenRouter.configure({ apiKey: "test-key" }).model("openai/gpt-4o-mini")
+  it.effect("routes OpenAI, xAI, and Meta models through their native Responses protocols", () =>
+    Effect.forEach(
+      [
+        ["openai/gpt-4o-mini", "openrouter-responses"],
+        ["x-ai/grok-4.3", "openrouter-xai-responses"],
+        ["meta/muse-spark-1.3", "openrouter-meta-responses"],
+      ] as const,
+      ([id, route]) =>
+        Effect.gen(function* () {
+          const model = OpenRouter.configure({ apiKey: "test-key" }).model(id)
+          const prepared = yield* compileRequest(LLM.request({ model, prompt: "Say hello." }))
 
-      expect(model).toMatchObject({
-        id: "openai/gpt-4o-mini",
-        provider: "openrouter",
-        route: { id: "openrouter" },
-      })
-      expect(model.route.endpoint.baseURL).toBe("https://openrouter.ai/api/v1")
-
-      const prepared = yield* compileRequest(LLM.request({ model, prompt: "Say hello." }))
-
-      expect(prepared.route).toBe("openrouter")
-      expect(prepared.body).toMatchObject({
-        model: "openai/gpt-4o-mini",
-        messages: [{ role: "user", content: "Say hello." }],
-        stream: true,
-        usage: { include: true },
-      })
-    }),
+          expect(model.route.endpoint.baseURL).toBe("https://openrouter.ai/api/v1")
+          expect(prepared.route).toBe(route)
+          expect(prepared.body).toMatchObject({
+            model: id,
+            input: [{ role: "user", content: [{ type: "input_text", text: "Say hello." }] }],
+            stream: true,
+            store: false,
+            include: ["reasoning.encrypted_content"],
+          })
+        }),
+    ),
   )
 
   it.effect("places default cache breakpoints on tools, system boundaries, and the conversation tail", () =>
@@ -51,20 +53,87 @@ describe("OpenRouter", () => {
       )
 
       expect(prepared.body.tools?.map((tool) => tool.cache_control)).toEqual([undefined, { type: "ephemeral" }])
+      expect(prepared.route).toBe("openrouter-messages")
+      expect(prepared.body.system).toMatchObject([
+        { text: "Base agent", cache_control: { type: "ephemeral" } },
+        { text: "Model details" },
+        { text: "Project instructions", cache_control: { type: "ephemeral" } },
+      ])
       expect(prepared.body.messages).toMatchObject([
-        {
-          role: "system",
-          content: [
-            { text: "Base agent", cache_control: { type: "ephemeral" } },
-            { text: "Model details" },
-            { text: "Project instructions", cache_control: { type: "ephemeral" } },
-          ],
-        },
         { role: "user", content: [{ text: "Hello", cache_control: { type: "ephemeral" } }] },
       ])
-      expect(prepared.body.messages[0]?.content).not.toContainEqual(
+      expect(prepared.body.system).not.toContainEqual(
         expect.objectContaining({ text: "Model details", cache_control: expect.anything() }),
       )
+    }),
+  )
+
+  it.effect("preserves gateway routing and lowers native effort updates without changing the baseline", () =>
+    Effect.gen(function* () {
+      const openrouter = OpenRouter.configure({
+        apiKey: "test-key",
+        providerOptions: { provider: { allow_fallbacks: false }, reasoning: { effort: "low" } },
+      })
+      const messages = [Message.effort({ previous: "high", effort: "low" }), Message.user("Hello")]
+      const response = yield* compileRequest(LLM.request({ model: openrouter.model("openai/gpt-6-luna"), messages }))
+      const message = yield* compileRequest(
+        LLM.request({ model: openrouter.model("anthropic/claude-fable-5.1"), messages }),
+      )
+
+      expect(response.body).toMatchObject({
+        provider: { allow_fallbacks: false },
+        reasoning: { effort: "high" },
+        input: [{ type: "configuration_update", reasoning: { effort: "low" } }, { role: "user" }],
+      })
+      expect(message.body).toMatchObject({
+        provider: { allow_fallbacks: false },
+        output_config: { effort: "high" },
+        thinking: { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } },
+        messages: [{ role: "system", content: [], output_config: { effort: "low" } }, { role: "user" }],
+      })
+    }),
+  )
+
+  it.effect("replays saved Chat reasoning details through the native APIs", () =>
+    Effect.gen(function* () {
+      const openrouter = OpenRouter.configure({ apiKey: "test-key" })
+      const message = yield* compileRequest(
+        LLM.request({
+          model: openrouter.model("anthropic/claude-sonnet-4.6"),
+          messages: [
+            Message.assistant({
+              type: "reasoning",
+              text: "AB",
+              providerMetadata: {
+                openrouter: {
+                  reasoningDetails: [
+                    { type: "reasoning.text", text: "A", signature: "first" },
+                    { type: "reasoning.text", text: "B", signature: "second" },
+                  ],
+                },
+              },
+            }),
+          ],
+        }),
+      )
+      const response = yield* compileRequest(
+        LLM.request({
+          model: openrouter.model("meta/muse-spark-1.3"),
+          messages: [
+            Message.assistant({
+              type: "reasoning",
+              text: "Summary",
+              providerMetadata: { openrouter: { reasoningDetails: [{ type: "reasoning.encrypted", data: "opaque" }] } },
+            }),
+          ],
+        }),
+      )
+
+      expect(message.body.messages[0]?.content).toMatchObject([
+        { type: "thinking", thinking: "A", signature: "first" },
+        { type: "thinking", thinking: "B", signature: "second" },
+      ])
+      expect(response.body.input[0]).toMatchObject({ type: "reasoning", encrypted_content: "opaque" })
     }),
   )
 
@@ -80,8 +149,8 @@ describe("OpenRouter", () => {
       )
 
       expect(prepared.body.tools?.[0]?.cache_control).toEqual({ type: "ephemeral" })
+      expect(prepared.body.system).toMatchObject([{ text: "Base agent", cache_control: { type: "ephemeral" } }])
       expect(prepared.body.messages).toMatchObject([
-        { role: "system", content: [{ text: "Base agent", cache_control: { type: "ephemeral" } }] },
         { role: "user", content: [{ text: "Hello", cache_control: { type: "ephemeral" } }] },
       ])
     }),
@@ -143,10 +212,7 @@ describe("OpenRouter", () => {
 
       bodies.forEach((body) => {
         expect(body.tools?.[0]?.cache_control).toBeUndefined()
-        expect(body.messages).toMatchObject([
-          { role: "system", content: "Base agent" },
-          { role: "user", content: "Hello" },
-        ])
+        expect(JSON.stringify(body)).not.toContain("cache_control")
       })
     }),
   )
@@ -168,14 +234,11 @@ describe("OpenRouter", () => {
 
       expect(prepared.body).toMatchObject({
         tools: [{ cache_control: { type: "ephemeral" } }],
+        system: [
+          { text: "Base agent", cache_control: { type: "ephemeral", ttl: "1h" } },
+          { text: "Project instructions", cache_control: { type: "ephemeral" } },
+        ],
         messages: [
-          {
-            role: "system",
-            content: [
-              { text: "Base agent", cache_control: { type: "ephemeral", ttl: "1h" } },
-              { text: "Project instructions", cache_control: { type: "ephemeral" } },
-            ],
-          },
           {
             role: "user",
             content: [{ text: "Hello", cache_control: { type: "ephemeral" } }],
@@ -189,7 +252,7 @@ describe("OpenRouter", () => {
     Effect.gen(function* () {
       const prepared = yield* compileRequest(
         LLM.request({
-          model: OpenRouter.configure({ apiKey: "test-key" }).model("anthropic/claude-sonnet-4.6"),
+          model: OpenRouter.configure({ apiKey: "test-key" }).chat("anthropic/claude-sonnet-4.6"),
           cache: "none",
           messages: [
             Message.user("Call the tool"),
@@ -238,13 +301,7 @@ describe("OpenRouter", () => {
         }),
       )
 
-      const system = prepared.body.messages[0]
-      expect(system?.role).toBe("system")
-      expect(
-        system && Array.isArray(system.content)
-          ? system.content.filter((part) => "cache_control" in part && part.cache_control !== undefined)
-          : [],
-      ).toHaveLength(4)
+      expect(prepared.body.system?.filter((part) => part.cache_control !== undefined)).toHaveLength(4)
     }),
   )
 
@@ -252,7 +309,7 @@ describe("OpenRouter", () => {
     Effect.gen(function* () {
       const prepared = yield* compileRequest(
         LLM.request({
-          model: OpenRouter.configure({ apiKey: "test-key" }).model("anthropic/claude-sonnet-4.6"),
+          model: OpenRouter.configure({ apiKey: "test-key" }).chat("anthropic/claude-sonnet-4.6"),
           cache: { messages: "latest-assistant" },
           messages: [Message.user("Think"), Message.assistant([{ type: "reasoning", text: "Reasoning" }])],
         }),
@@ -270,7 +327,7 @@ describe("OpenRouter", () => {
     Effect.gen(function* () {
       const prepared = yield* compileRequest(
         LLM.request({
-          model: OpenRouter.configure({ apiKey: "test-key" }).model("anthropic/claude-sonnet-4.6"),
+          model: OpenRouter.configure({ apiKey: "test-key" }).chat("anthropic/claude-sonnet-4.6"),
           system: [
             { type: "text", text: "Base agent" },
             { type: "text", text: "Project instructions" },
@@ -302,7 +359,7 @@ describe("OpenRouter", () => {
           model: OpenRouter.configure({
             apiKey: "test-key",
             providerOptions: { usage: false },
-          }).model("openai/gpt-4o-mini"),
+          }).chat("openai/gpt-4o-mini"),
           cache: "none",
           prompt: "Hello",
         }),
@@ -350,7 +407,7 @@ describe("OpenRouter", () => {
               user: "user_123",
               future_option: { enabled: true },
             },
-          }).model("anthropic/claude-3.7-sonnet:thinking"),
+          }).chat("anthropic/claude-3.7-sonnet:thinking"),
           prompt: "Think briefly.",
           promptCacheKey: "session_123",
         }),
@@ -425,7 +482,7 @@ describe("OpenRouter", () => {
 
   it.effect("preserves the upstream provider finish reason", () =>
     Effect.gen(function* () {
-      const model = OpenRouter.configure({ apiKey: "test-key" }).model("anthropic/claude-sonnet-4.6")
+      const model = OpenRouter.configure({ apiKey: "test-key" }).chat("anthropic/claude-sonnet-4.6")
       const response = yield* LLMClient.generate(LLM.request({ model, prompt: "Say hello." })).pipe(
         Effect.provide(
           fixedResponse(
@@ -442,7 +499,7 @@ describe("OpenRouter", () => {
 
   it.effect("fails on a mid-stream provider error", () =>
     Effect.gen(function* () {
-      const model = OpenRouter.configure({ apiKey: "test-key" }).model("openai/gpt-4o-mini")
+      const model = OpenRouter.configure({ apiKey: "test-key" }).chat("openai/gpt-4o-mini")
       const error = yield* LLMClient.generate(LLM.request({ model, prompt: "Say hello." })).pipe(
         Effect.provide(
           fixedResponse(
@@ -469,7 +526,7 @@ describe("OpenRouter", () => {
       ]
       const prepared = yield* compileRequest(
         LLM.request({
-          model: OpenRouter.configure({ apiKey: "test-key" }).model("anthropic/claude-sonnet-4.6"),
+          model: OpenRouter.configure({ apiKey: "test-key" }).chat("anthropic/claude-sonnet-4.6"),
           cache: "none",
           messages: [
             Message.assistant([
@@ -504,7 +561,7 @@ describe("OpenRouter", () => {
       ]
       const prepared = yield* compileRequest(
         LLM.request({
-          model: OpenRouter.configure({ apiKey: "test-key" }).model("anthropic/claude-sonnet-4.6"),
+          model: OpenRouter.configure({ apiKey: "test-key" }).chat("anthropic/claude-sonnet-4.6"),
           cache: "none",
           messages: [
             Message.assistant({
@@ -545,7 +602,7 @@ describe("OpenRouter", () => {
       ]
       const prepared = yield* compileRequest(
         LLM.request({
-          model: OpenRouter.configure({ apiKey: "test-key" }).model("anthropic/claude-sonnet-4.6"),
+          model: OpenRouter.configure({ apiKey: "test-key" }).chat("anthropic/claude-sonnet-4.6"),
           cache: "none",
           messages: [
             Message.assistant({
@@ -574,7 +631,7 @@ describe("OpenRouter", () => {
     Effect.gen(function* () {
       const prepared = yield* compileRequest(
         LLM.request({
-          model: OpenRouter.configure({ apiKey: "test-key" }).model("anthropic/claude-sonnet-4.6"),
+          model: OpenRouter.configure({ apiKey: "test-key" }).chat("anthropic/claude-sonnet-4.6"),
           cache: "none",
           messages: [Message.assistant({ type: "reasoning", text: "Thinking" })],
         }),

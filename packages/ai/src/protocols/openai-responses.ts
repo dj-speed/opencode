@@ -124,7 +124,7 @@ const OpenAIResponsesCoreFields = {
   ),
 }
 
-const OpenAIResponsesBody = Schema.Struct({
+export const OpenAIResponsesBody = Schema.Struct({
   ...OpenAIResponsesCoreFields,
   stream: Schema.Literal(true),
 })

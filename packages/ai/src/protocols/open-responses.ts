@@ -298,18 +298,22 @@ const OpenResponsesBody = Schema.Struct({
 })
 export type OpenResponsesBody = Schema.Schema.Type<typeof OpenResponsesBody>
 
-export const OpenResponsesUsage = Schema.Struct({
-  input_tokens: Schema.optional(Schema.Number),
-  input_tokens_details: optionalNull(
-    Schema.Struct({
-      cached_tokens: Schema.optional(Schema.Number),
-      cache_write_tokens: Schema.optional(Schema.Number),
-    }),
-  ),
-  output_tokens: Schema.optional(Schema.Number),
-  output_tokens_details: optionalNull(Schema.Struct({ reasoning_tokens: Schema.optional(Schema.Number) })),
-  total_tokens: Schema.optional(Schema.Number),
-})
+// Retain gateway billing extensions in provider metadata without changing normalized token accounting.
+export const OpenResponsesUsage = Schema.StructWithRest(
+  Schema.Struct({
+    input_tokens: Schema.optional(Schema.Number),
+    input_tokens_details: optionalNull(
+      Schema.Struct({
+        cached_tokens: Schema.optional(Schema.Number),
+        cache_write_tokens: Schema.optional(Schema.Number),
+      }),
+    ),
+    output_tokens: Schema.optional(Schema.Number),
+    output_tokens_details: optionalNull(Schema.Struct({ reasoning_tokens: Schema.optional(Schema.Number) })),
+    total_tokens: Schema.optional(Schema.Number),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+)
 type OpenResponsesUsage = Schema.Schema.Type<typeof OpenResponsesUsage>
 
 // The spec requires `id` on every output item, but some gateways drop it from
