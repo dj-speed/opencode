@@ -9,29 +9,49 @@ import { fixedResponse } from "../lib/http.js"
 import { sseEvents } from "../lib/sse.js"
 
 describe("OpenRouter", () => {
-  it.effect("routes OpenAI, xAI, and Meta models through their native Responses protocols", () =>
-    Effect.forEach(
-      [
-        ["openai/gpt-4o-mini", "openrouter-responses"],
-        ["x-ai/grok-4.3", "openrouter-xai-responses"],
-        ["meta/muse-spark-1.3", "openrouter-meta-responses"],
-      ] as const,
-      ([id, route]) =>
-        Effect.gen(function* () {
-          const model = OpenRouter.configure({ apiKey: "test-key" }).model(id)
-          const prepared = yield* compileRequest(LLM.request({ model, prompt: "Say hello." }))
+  it.effect("routes OpenAI, xAI, and Meta models through the same generic Responses protocol", () =>
+    Effect.forEach(["openai/gpt-4o-mini", "x-ai/grok-4.3", "meta/muse-spark-1.3", "~x-ai/grok-latest"], (id) =>
+      Effect.gen(function* () {
+        const model = OpenRouter.configure({
+          apiKey: "test-key",
+          providerOptions: {
+            reasoning: { effort: "low", exclude: true },
+            text: { verbosity: "low" },
+            provider: { allow_fallbacks: false },
+          },
+        }).model(id)
+        const prepared = yield* compileRequest(LLM.request({ model, prompt: "Say hello." }))
 
-          expect(model.route.endpoint.baseURL).toBe("https://openrouter.ai/api/v1")
-          expect(prepared.route).toBe(route)
-          expect(prepared.body).toMatchObject({
-            model: id,
-            input: [{ role: "user", content: [{ type: "input_text", text: "Say hello." }] }],
-            stream: true,
-            store: false,
-            include: ["reasoning.encrypted_content"],
-          })
-        }),
+        expect(model.route.endpoint.baseURL).toBe("https://openrouter.ai/api/v1")
+        expect(prepared.route).toBe("openrouter-responses")
+        expect(model.route.protocol).toBe(OpenRouter.responses("openai/gpt-4o-mini").route.protocol)
+        expect(prepared.body).toMatchObject({
+          model: id,
+          input: [{ role: "user", content: [{ type: "input_text", text: "Say hello." }] }],
+          stream: true,
+          store: false,
+          include: ["reasoning.encrypted_content"],
+          reasoning: { effort: "low", exclude: true },
+          text: { verbosity: "low" },
+          provider: { allow_fallbacks: false },
+        })
+      }),
     ),
+  )
+
+  it.effect("exposes exactly three API routes and leaves other families on Chat", () =>
+    Effect.gen(function* () {
+      expect(OpenRouter.routes.map((route) => route.endpoint.path)).toEqual([
+        "/chat/completions",
+        "/responses",
+        "/messages",
+      ])
+      const openrouter = OpenRouter.configure({ apiKey: "test-key" })
+      const chat = openrouter.model("meta-llama/llama-3.3-70b-instruct")
+      expect(chat.route.id).toBe("openrouter")
+      expect(openrouter.model("qwen/qwen3-coder-plus").route.protocol).toBe(chat.route.protocol)
+      expect(openrouter.messages("anthropic/claude-sonnet-4.6").route.id).toBe("openrouter-messages")
+    }),
   )
 
   it.effect("places default cache breakpoints on tools, system boundaries, and the conversation tail", () =>

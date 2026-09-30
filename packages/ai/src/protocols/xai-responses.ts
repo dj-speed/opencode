@@ -31,7 +31,7 @@ const XAIResponsesHostedToolItem = Schema.Union([
   ),
 ])
 
-export const XAIResponsesBody = Schema.Struct({
+const XAIResponsesBody = Schema.Struct({
   ...OpenResponses.coreFields,
   input: Schema.Array(Schema.Union([OpenResponses.InputItem, XAIResponsesHostedToolItem])),
   stream: Schema.Literal(true),

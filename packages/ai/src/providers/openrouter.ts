@@ -7,11 +7,10 @@ import { HttpOptions, ProviderID, type CacheHint, type ModelID, type OpenString 
 import type { ProviderPackage } from "../provider-package.js"
 import { SystemOne } from "../experimental/system-one.js"
 import { OpenAIChat } from "../protocols/openai-chat.js"
-import { OpenAIResponses } from "../protocols/openai-responses.js"
-import { XAIResponses } from "../protocols/xai-responses.js"
-import { MetaResponses } from "../protocols/meta-responses.js"
+import { OpenResponses } from "../protocols/open-responses.js"
 import { AnthropicMessages } from "../protocols/anthropic-messages.js"
 import { Framing } from "../route/framing.js"
+import { ProviderShared } from "../protocols/shared.js"
 import { newBreakpoints, ttlBucket } from "../protocols/utils/cache.js"
 import { OpenRouterWire } from "../protocols/utils/openrouter.js"
 
@@ -110,20 +109,14 @@ const ResponsesReasoning = Schema.StructWithRest(
   }),
   [Schema.Record(Schema.String, Schema.Unknown)],
 )
-const responsesFields = {
-  store: Schema.Literal(false),
-  reasoning: Schema.optional(ResponsesReasoning),
-}
 const OpenRouterResponsesBody = Schema.StructWithRest(
-  Schema.Struct({ ...OpenAIResponses.OpenAIResponsesBody.fields, ...responsesFields }),
-  [Schema.Record(Schema.String, Schema.Unknown)],
-)
-const OpenRouterXAIResponsesBody = Schema.StructWithRest(
-  Schema.Struct({ ...XAIResponses.XAIResponsesBody.fields, ...responsesFields }),
-  [Schema.Record(Schema.String, Schema.Unknown)],
-)
-const OpenRouterMetaResponsesBody = Schema.StructWithRest(
-  Schema.Struct({ ...MetaResponses.Body.fields, ...responsesFields }),
+  Schema.Struct({
+    ...OpenResponses.coreFields,
+    input: Schema.Array(Schema.Union([OpenResponses.InputItem, OpenResponses.ConfigurationUpdate])),
+    stream: Schema.Literal(true),
+    store: Schema.Literal(false),
+    reasoning: Schema.optional(ResponsesReasoning),
+  }),
   [Schema.Record(Schema.String, Schema.Unknown)],
 )
 const OpenRouterMessagesBody = Schema.StructWithRest(AnthropicMessages.AnthropicMessagesBody, [
@@ -168,36 +161,19 @@ export const protocol = Protocol.make({
 })
 
 const responsesProtocol = Protocol.make({
-  ...OpenAIResponses.protocol,
+  ...OpenResponses.protocol,
   id: "openrouter-responses",
+  supportsEffortUpdates: OpenRouterWire.supportsEffortUpdates,
   body: {
     schema: OpenRouterResponsesBody,
     from: (request) =>
-      OpenAIResponses.protocol.body
-        .from(OpenRouterWire.nativeRequest(request, "responses"))
-        .pipe(Effect.map((body) => OpenRouterWire.responsesOptions(request, body))),
-  },
-})
-const xaiProtocol = Protocol.make({
-  ...XAIResponses.protocol,
-  id: "openrouter-xai-responses",
-  body: {
-    schema: OpenRouterXAIResponsesBody,
-    from: (request) =>
-      XAIResponses.protocol.body
-        .from(OpenRouterWire.nativeRequest(request, "responses"))
-        .pipe(Effect.map((body) => OpenRouterWire.responsesOptions(request, body))),
-  },
-})
-const metaProtocol = Protocol.make({
-  ...MetaResponses.protocol,
-  id: "openrouter-meta-responses",
-  body: {
-    schema: OpenRouterMetaResponsesBody,
-    from: (request) =>
-      MetaResponses.protocol.body
-        .from(OpenRouterWire.nativeRequest(request, "responses"))
-        .pipe(Effect.map((body) => OpenRouterWire.responsesOptions(request, body))),
+      OpenResponses.fromRequestWithAdapter(OpenRouterWire.nativeRequest(request, "responses"), {
+        id: "openrouter-responses",
+        name: "OpenRouter Responses",
+      }).pipe(
+        Effect.map((body) => OpenRouterWire.responsesOptions(request, body)),
+        Effect.flatMap(ProviderShared.validateWith(Schema.decodeUnknownEffect(OpenRouterResponsesBody))),
+      ),
   },
 })
 const messagesProtocol = Protocol.make({
@@ -249,24 +225,6 @@ const responsesRoute = Route.make({
   framing: Framing.sse,
   defaults: { providerOptions: { store: false, include: ["reasoning.encrypted_content"] } },
 })
-const xaiRoute = Route.make({
-  id: "openrouter-xai-responses",
-  provider: id,
-  providerMetadataKey: "openrouter",
-  protocol: xaiProtocol,
-  endpoint: Endpoint.path("/responses", { baseURL }),
-  framing: Framing.sse,
-  defaults: { providerOptions: { store: false, include: ["reasoning.encrypted_content"] } },
-})
-const metaRoute = Route.make({
-  id: "openrouter-meta-responses",
-  provider: id,
-  providerMetadataKey: "openrouter",
-  protocol: metaProtocol,
-  endpoint: Endpoint.path("/responses", { baseURL }),
-  framing: Framing.sse,
-  defaults: { providerOptions: { store: false, include: ["reasoning.encrypted_content"] } },
-})
 const messagesRoute = Route.make({
   id: "openrouter-messages",
   provider: id,
@@ -276,7 +234,7 @@ const messagesRoute = Route.make({
   transport: AnthropicMessages.transport<OpenRouterMessagesBody>(),
 })
 
-export const routes = [route, responsesRoute, xaiRoute, metaRoute, messagesRoute]
+export const routes = [route, responsesRoute, messagesRoute]
 
 const routeOptions = (input: LanguageModelOptions) => {
   const { apiKey: _, auth: _auth, baseURL: endpoint, ...rest } = input
@@ -290,18 +248,11 @@ const routeOptions = (input: LanguageModelOptions) => {
 export const configure = (input: LanguageModelOptions = {}) => {
   const options = routeOptions(input)
   const chatRoute = route.with(options)
-  const openaiResponses = responsesRoute.with(options)
-  const xaiResponses = xaiRoute.with(options)
-  const metaResponses = metaRoute.with(options)
+  const openResponses = responsesRoute.with(options)
   const anthropicMessages = messagesRoute.with(options)
   const chat = (modelID: string | ModelID) =>
     chatRoute.model<OpenRouterProviderOptionsInput>({ id: modelID, compatibility: { supportsPromptCacheKey: true } })
-  const responses = (modelID: string | ModelID) => {
-    const model = String(modelID).replace(/^~/, "")
-    return (
-      model.startsWith("x-ai/") ? xaiResponses : model.startsWith("meta/") ? metaResponses : openaiResponses
-    ).model<OpenRouterProviderOptionsInput>({ id: modelID })
-  }
+  const responses = (modelID: string | ModelID) => openResponses.model<OpenRouterProviderOptionsInput>({ id: modelID })
   const messages = (modelID: string | ModelID) =>
     anthropicMessages.model<OpenRouterProviderOptionsInput>({ id: modelID })
   const evaluation = (modelID: string | ModelID) =>

@@ -44,7 +44,7 @@ const ImageItem = Schema.Struct({
   error: Schema.optional(Schema.Unknown),
 })
 
-export const Body = Schema.Struct({
+const Body = Schema.Struct({
   ...OpenResponses.coreFields,
   input: Schema.Array(Schema.Union([OpenResponses.InputItem, ImageItem])),
   tools: optionalArray(Schema.Union([OpenResponses.Tool, NativeTool])),

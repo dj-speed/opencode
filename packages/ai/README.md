@@ -1210,8 +1210,10 @@ LLM.request({
 Normalized cache usage is read back into `response.usage.cacheReadInputTokens` and `cacheWriteInputTokens` across every provider.
 
 OpenRouter selects its wire API by model family: `openai/*`, `x-ai/*`, and `meta/*` use Responses; `anthropic/*` uses
-Anthropic Messages; other families use Chat Completions. Leading-`~` model aliases follow the same routing. Explicit
-`openrouter.chat(id)`, `.responses(id)`, and `.messages(id)` selectors are available for API-specific integrations.
+Anthropic Messages; other families use Chat Completions. All three Responses families share the provider-neutral
+Responses serializer and stream parser; there are no per-vendor OpenRouter protocols. Leading-`~` model aliases follow
+the same routing. Explicit `openrouter.chat(id)`, `.responses(id)`, and `.messages(id)` selectors are available for
+API-specific integrations.
 Qwen retains Chat's explicit system/conversation cache markers, while Claude uses native Messages cache blocks.
 OpenRouter Responses is stateless (`store: false`); every request includes full history, not `previous_response_id`.
 Meta currently accepts only automatic tool selection on both its Chat and Responses upstreams; forced/disabled tool

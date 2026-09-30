@@ -163,7 +163,7 @@ export const CompactionItem = Schema.Struct({
   encrypted_content: Schema.String,
 })
 
-// Kept out of the baseline `InputItem` union: only the OpenAI extension accepts it.
+// Kept out of the baseline `InputItem` union; extensions such as OpenAI and OpenRouter opt in.
 export const ConfigurationUpdate = Schema.Struct({
   type: Schema.Literal("configuration_update"),
   reasoning: Schema.Struct({ effort: OpenResponsesOptions.ReasoningEffort }),

@@ -2,7 +2,9 @@ export * as OpenRouterWire from "./openrouter.js"
 
 import { Option, Schema } from "effect"
 import { LLMRequest, Message, type ContentPart, type ReasoningPart } from "../../schema/index.js"
+import { resolveEffortUpdates } from "../../effort-updates.js"
 import type { OpenResponses } from "../open-responses.js"
+import { OpenResponsesOptions } from "./open-responses-options.js"
 import { isRecord, ProviderShared } from "../shared.js"
 
 const ReplayDetail = Schema.Struct({
@@ -14,19 +16,33 @@ const ReplayDetail = Schema.Struct({
 })
 const decodeReplayDetail = Schema.decodeUnknownOption(ReplayDetail)
 
+// OpenRouter's generic Responses API supports chronological effort updates only on eligible models.
+export function supportsEffortUpdates(request: LLMRequest) {
+  if (request.providerOptions?.truncation === "auto" || request.http?.body?.truncation === "auto") return false
+  if (Schema.is(Schema.Struct({ mode: Schema.Literal("pro") }))(request.providerOptions?.reasoning)) return false
+  if (Schema.is(Schema.Struct({ mode: Schema.Literal("pro") }))(request.http?.body?.reasoning)) return false
+  return (
+    request.model.compatibility?.supportsEffortUpdates ?? /^~?openai\/gpt-6-(?:astra|sol|luna)$/i.test(request.model.id)
+  )
+}
+
 export function nativeRequest(request: LLMRequest, format: "responses" | "messages") {
   const options = request.providerOptions ?? {}
   const reasoning = isRecord(options.reasoning)
     ? fitReasoning(options.reasoning, request.generation?.maxTokens)
     : undefined
   const disabled = reasoning?.enabled === false || reasoning?.effort === "none"
+  const updates = resolveEffortUpdates(
+    request,
+    OpenResponsesOptions.resolve(request).reasoningEffort ??
+      (typeof reasoning?.effort === "string" ? reasoning.effort : undefined),
+  )
   return LLMRequest.update(request, {
     providerOptions:
       format === "responses"
         ? {
             ...options,
-            reasoningEffort:
-              options.reasoningEffort ?? (typeof reasoning?.effort === "string" ? reasoning.effort : undefined),
+            reasoningEffort: updates.effort,
           }
         : {
             ...options,
@@ -42,7 +58,7 @@ export function nativeRequest(request: LLMRequest, format: "responses" | "messag
                   return { type: "adaptive", ...(reasoning.exclude === true ? { display: "omitted" } : {}) }
               })(),
           },
-    messages: request.messages.map((message) => {
+    messages: (format === "responses" ? updates.request : request).messages.map((message) => {
       if (
         !message.content.some(
           (part) => part.type === "reasoning" && part.providerMetadata?.openrouter?.reasoningDetails !== undefined,

@@ -8,7 +8,7 @@ import { expectWeatherToolLoop, goldenWeatherToolLoopRequest, runWeatherToolLoop
 const recorded = recordedTests({
   prefix: "openrouter-responses",
   provider: "openrouter",
-  protocol: "openrouter-meta-responses",
+  protocol: "openrouter-responses",
   requires: ["OPENROUTER_API_KEY"],
 })
 
